@@ -20,47 +20,56 @@ import com.dataartisans.flinktraining.exercises.datastream_java.datatypes.TaxiFa
 import com.dataartisans.flinktraining.exercises.datastream_java.sources.TaxiFareSource;
 import com.dataartisans.flinktraining.exercises.datastream_java.utils.ExerciseBase;
 import com.dataartisans.flinktraining.exercises.datastream_java.utils.MissingSolutionException;
+import org.apache.flink.api.common.functions.AggregateFunction;
+import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.api.java.utils.ParameterTool;
 import org.apache.flink.streaming.api.TimeCharacteristic;
 import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.windowing.assigners.TumblingEventTimeWindows;
+import org.apache.flink.streaming.api.windowing.assigners.TumblingProcessingTimeWindows;
+import org.apache.flink.streaming.api.windowing.assigners.WindowAssigner;
+import org.apache.flink.streaming.api.windowing.time.Time;
 
 /**
  * The "Hourly Tips" exercise of the Flink training
  * (http://training.data-artisans.com).
- *
+ * <p>
  * The task of the exercise is to first calculate the total tips collected by each driver, hour by hour, and
  * then from that stream, find the highest tip total in each hour.
- *
+ * <p>
  * Parameters:
  * -input path-to-input-file
- *
  */
 public class HourlyTipsExercise extends ExerciseBase {
 
-	public static void main(String[] args) throws Exception {
+    public static void main(String[] args) throws Exception {
 
-		// read parameters
-		ParameterTool params = ParameterTool.fromArgs(args);
-		final String input = params.get("input", ExerciseBase.pathToFareData);
+        // read parameters
+        ParameterTool params = ParameterTool.fromArgs(args);
+        final String input = params.get("input", ExerciseBase.pathToFareData);
 
-		final int maxEventDelay = 60;       // events are out of order by max 60 seconds
-		final int servingSpeedFactor = 600; // events of 10 minutes are served in 1 second
+        final int maxEventDelay = 60;       // events are out of order by max 60 seconds
+        final int servingSpeedFactor = 600; // events of 10 minutes are served in 1 second
 
-		// set up streaming execution environment
-		StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-		env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime);
-		env.setParallelism(ExerciseBase.parallelism);
+        // set up streaming execution environment
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime);
+        env.setParallelism(ExerciseBase.parallelism);
 
-		// start the data generator
-		DataStream<TaxiFare> fares = env.addSource(fareSourceOrTest(new TaxiFareSource(input, maxEventDelay, servingSpeedFactor)));
+        // start the data generator
+        DataStream<TaxiFare> fares = env.addSource(fareSourceOrTest(new TaxiFareSource(input, maxEventDelay, servingSpeedFactor)));
 
-		throw new MissingSolutionException();
+        // https://ci.apache.org/projects/flink/flink-docs-release-1.5/dev/stream/operators/windows.html
+        SingleOutputStreamOperator<TaxiFare> hourlyMax = fares.keyBy("driverId").window(TumblingEventTimeWindows.of(Time.hours(1))).sum("tip")//
+                .keyBy("window.time").reduce((rider1, rider2) -> rider1.tipSum > rider2.tipSum ? rider1 : rider2);
 
-//		printOrTest(hourlyMax);
+        //throw new MissingSolutionException();
 
-		// execute the transformation pipeline
-//		env.execute("Hourly Tips (java)");
-	}
+        printOrTest(hourlyMax);
 
+        // execute the transformation pipeline
+        env.execute("Hourly Tips (java)");
+    }
 }
