@@ -16,21 +16,19 @@
 
 package com.dataartisans.flinktraining.exercises.datastream_java.windows;
 
-import com.dataartisans.flinktraining.exercises.datastream_java.datatypes.TaxiFare;
-import com.dataartisans.flinktraining.exercises.datastream_java.sources.TaxiFareSource;
-import com.dataartisans.flinktraining.exercises.datastream_java.utils.ExerciseBase;
-import com.dataartisans.flinktraining.exercises.datastream_java.utils.MissingSolutionException;
-import org.apache.flink.api.common.functions.AggregateFunction;
-import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.api.java.utils.ParameterTool;
 import org.apache.flink.streaming.api.TimeCharacteristic;
 import org.apache.flink.streaming.api.datastream.DataStream;
-import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.functions.windowing.WindowFunction;
 import org.apache.flink.streaming.api.windowing.assigners.TumblingEventTimeWindows;
-import org.apache.flink.streaming.api.windowing.assigners.TumblingProcessingTimeWindows;
-import org.apache.flink.streaming.api.windowing.assigners.WindowAssigner;
 import org.apache.flink.streaming.api.windowing.time.Time;
+import org.apache.flink.streaming.api.windowing.windows.TimeWindow;
+import org.apache.flink.util.Collector;
+import com.dataartisans.flinktraining.exercises.datastream_java.datatypes.TaxiFare;
+import com.dataartisans.flinktraining.exercises.datastream_java.sources.TaxiFareSource;
+import com.dataartisans.flinktraining.exercises.datastream_java.utils.ExerciseBase;
 
 /**
  * The "Hourly Tips" exercise of the Flink training
@@ -62,8 +60,11 @@ public class HourlyTipsExercise extends ExerciseBase {
         DataStream<TaxiFare> fares = env.addSource(fareSourceOrTest(new TaxiFareSource(input, maxEventDelay, servingSpeedFactor)));
 
         // https://ci.apache.org/projects/flink/flink-docs-release-1.5/dev/stream/operators/windows.html
-        SingleOutputStreamOperator<TaxiFare> hourlyMax = fares.keyBy("driverId").window(TumblingEventTimeWindows.of(Time.hours(1))).sum("tip")//
-                .keyBy("window.time").reduce((rider1, rider2) -> rider1.tipSum > rider2.tipSum ? rider1 : rider2);
+        DataStream<Tuple3<Long, Long, Float>> hourlyTips = fares.keyBy((TaxiFare fare) -> fare.driverId).
+                window(TumblingEventTimeWindows.of(Time.hours(1))).
+                apply(new SumTips());
+
+        DataStream<Tuple3<Long, Long, Float>> hourlyMax = hourlyTips.timeWindowAll(Time.hours(1)).maxBy(2);
 
         //throw new MissingSolutionException();
 
@@ -71,5 +72,14 @@ public class HourlyTipsExercise extends ExerciseBase {
 
         // execute the transformation pipeline
         env.execute("Hourly Tips (java)");
+    }
+
+    public static class SumTips implements WindowFunction<TaxiFare, Tuple3<Long, Long, Float>, Long, TimeWindow> {
+        @Override
+        public void apply(Long key, TimeWindow window, Iterable<TaxiFare> input, Collector<Tuple3<Long, Long, Float>> out) throws Exception {
+            Float[] tipSum = new Float[]{0.f};
+            input.forEach(taxiFare -> tipSum[0] += taxiFare.tip);
+            out.collect(Tuple3.of(window.getEnd(), key, tipSum[0]));
+        }
     }
 }
